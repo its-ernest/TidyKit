@@ -2,13 +2,15 @@ package ui
 
 import (
 	"fmt"
-	"io/fs"
+	"os"
 	"path/filepath"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"tidykit/scanner"
 )
 
 // ShowModal wraps arbitrary CanvasObject content inside a dismissible modal overlay.
@@ -23,126 +25,182 @@ func ShowModal(title string, content fyne.CanvasObject, canvas fyne.Canvas) *wid
 	})
 
 	topBar := container.NewBorder(nil, nil, header, closeBtn)
+
 	modalLayout := container.NewBorder(
 		container.NewVBox(topBar, widget.NewSeparator()),
 		nil, nil, nil,
 		content,
 	)
 
-	// Fixed size overlay container
-	padded := container.NewPadded(modalLayout)
-	sizedContainer := container.NewGridWithRows(1, padded)
+	sizedContainer := container.NewPadded(modalLayout)
 
 	modal = widget.NewModalPopUp(sizedContainer, canvas)
-	modal.Resize(fyne.NewSize(700, 500))
+	modal.Resize(fyne.NewSize(750, 500))
 	modal.Show()
 
 	return modal
 }
 
-// TreeItem represents a file or folder in our recursive scan model
-type TreeItem struct {
-	Path     string
-	Name     string
-	Size     int64
-	IsDir    bool
-	Children []string // Child paths
+type TreeItem = scanner.TreeItem
+
+// Helper to format byte sizes into human-readable strings
+func formatBytes(bytes uint64) string {
+	return scanner.FormatBytes(bytes)
 }
 
-// ShowScanModal launches a recursive directory scanner and displays results in a collapsible tree.
+// ShowScanModal launches a recursive directory scanner and displays results in a navigable list.
 func ShowScanModal(rootPath string, canvas fyne.Canvas) {
-	statusLabel := widget.NewLabel("Scanning file tree...")
+	statusLabel := widget.NewLabel(fmt.Sprintf("Scanning %s...", rootPath))
 	progress := widget.NewProgressBarInfinite()
 
-	loadingView := container.NewVBox(
-		statusLabel,
-		progress,
+	loadingView := container.NewCenter(
+		container.NewVBox(
+			statusLabel,
+			progress,
+		),
 	)
 
 	contentBox := container.NewStack(loadingView)
-	modal := ShowModal(fmt.Sprintf("Scan Results: %s", rootPath), contentBox, canvas)
+	_ = ShowModal(fmt.Sprintf("Scan Results: %s", rootPath), contentBox, canvas)
 
 	go func() {
-		nodes := make(map[string]*TreeItem)
-
-		// Recursive scan capped at reasonable depth for quick UX display
-		_ = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil // skip unreadable paths
-			}
-
-			info, err := d.Info()
-			var size int64
-			if err == nil {
-				size = info.Size()
-			}
-
-			item := &TreeItem{
-				Path:  path,
-				Name:  d.Name(),
-				Size:  size,
-				IsDir: d.IsDir(),
-			}
-
-			nodes[path] = item
-
-			parent := filepath.Dir(path)
-			if parent != path {
-				if parentItem, ok := nodes[parent]; ok {
-					parentItem.Children = append(parentItem.Children, path)
+		nodes, err := scanner.ScanDir(rootPath)
+		if err != nil {
+			fyne.Do(func() {
+				contentBox.Objects = []fyne.CanvasObject{
+					widget.NewLabel("Failed to access or read directory."),
 				}
-			}
+				contentBox.Refresh()
+			})
+			return
+		}
 
-			return nil
-		})
+		cleanRoot := filepath.Clean(rootPath)
+		var currentPath string = cleanRoot
 
-		// Build Collapsible Recursive Tree Widget
-		tree := widget.NewTree(
-			func(id string) []string {
-				if id == "" {
-					return []string{rootPath}
+		pathLabel := widget.NewLabel(currentPath)
+
+		var list *widget.List
+		list = widget.NewList(
+			func() int {
+				if item, ok := nodes[currentPath]; ok {
+					return len(item.Children)
 				}
-				if item, ok := nodes[id]; ok {
-					return item.Children
-				}
-				return nil
+				return 0
 			},
-			func(id string) bool {
-				if item, ok := nodes[id]; ok {
-					return item.IsDir
-				}
-				return false
-			},
-			func(branch bool) fyne.CanvasObject {
-				return container.NewHBox(
-					widget.NewIcon(theme.FileIcon()),
-					widget.NewLabel("Template Path Item"),
+			func() fyne.CanvasObject {
+				deleteBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), nil)
+				return container.NewBorder(
+					nil, nil,
+					container.NewHBox(
+						widget.NewIcon(theme.FolderIcon()),
+						widget.NewLabel("Template"),
+					),
+					deleteBtn,
 				)
 			},
-			func(id string, branch bool, obj fyne.CanvasObject) {
-				box := obj.(*fyne.Container)
-				icon := box.Objects[0].(*widget.Icon)
-				label := box.Objects[1].(*widget.Label)
+			func(id widget.ListItemID, obj fyne.CanvasObject) {
+				border := obj.(*fyne.Container)
+				leftContent := border.Objects[0].(*fyne.Container)
+				deleteBtn := border.Objects[1].(*widget.Button)
 
-				item, ok := nodes[id]
-				if !ok {
-					return
-				}
+				icon := leftContent.Objects[0].(*widget.Icon)
+				label := leftContent.Objects[1].(*widget.Label)
 
-				if branch {
-					icon.SetResource(theme.FolderIcon())
-					label.SetText(item.Name)
-				} else {
-					icon.SetResource(theme.FileIcon())
-					label.SetText(fmt.Sprintf("%s (%s)", item.Name, formatBytes(uint64(item.Size))))
+				if item, ok := nodes[currentPath]; ok {
+					if id < len(item.Children) {
+						childPath := item.Children[id]
+						if childItem, ok := nodes[childPath]; ok {
+							if childItem.IsDir {
+								icon.SetResource(theme.FolderIcon())
+								label.SetText(fmt.Sprintf("%s/", childItem.Name))
+							} else {
+								icon.SetResource(theme.FileIcon())
+								label.SetText(fmt.Sprintf("%s (%s)", childItem.Name, scanner.FormatBytes(uint64(childItem.Size))))
+							}
+
+							childPathCopy := childPath
+							deleteBtn.OnTapped = func() {
+								go func() {
+									_ = os.RemoveAll(childPathCopy)
+									fyne.Do(func() {
+										removeNodeAndDescendants(nodes, childPathCopy)
+										if parentItem, ok := nodes[currentPath]; ok {
+											for i, child := range parentItem.Children {
+												if child == childPathCopy {
+													parentItem.Children = append(parentItem.Children[:i], parentItem.Children[i+1:]...)
+													break
+												}
+											}
+										}
+										list.Refresh()
+									})
+								}()
+							}
+						}
+					}
 				}
 			},
 		)
 
+		backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+			parent := filepath.Dir(currentPath)
+			if parent != currentPath {
+				currentPath = parent
+				pathLabel.SetText(currentPath)
+				list.Refresh()
+			}
+		})
+		if currentPath == cleanRoot {
+			backBtn.Disable()
+		}
+
+		list.OnSelected = func(id widget.ListItemID) {
+			if item, ok := nodes[currentPath]; ok {
+				if id < len(item.Children) {
+					childPath := item.Children[id]
+					if childItem, ok := nodes[childPath]; ok && childItem.IsDir {
+						currentPath = childPath
+						pathLabel.SetText(currentPath)
+						if filepath.Dir(currentPath) != cleanRoot {
+							backBtn.Enable()
+						} else {
+							backBtn.Disable()
+						}
+						list.Refresh()
+					}
+				}
+			}
+		}
+
+		header := container.NewBorder(
+			nil, nil,
+			widget.NewLabelWithStyle("Current Directory", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			backBtn,
+			pathLabel,
+		)
+
+		content := container.NewBorder(
+			container.NewVBox(
+				header,
+				widget.NewSeparator(),
+			),
+			nil, nil, nil,
+			list,
+		)
+
 		fyne.Do(func() {
-			contentBox.Objects = []fyne.CanvasObject{tree}
+			contentBox.Objects = []fyne.CanvasObject{content}
 			contentBox.Refresh()
-			_ = modal
 		})
 	}()
+}
+
+func removeNodeAndDescendants(nodes map[string]*scanner.TreeItem, path string) {
+	if item, ok := nodes[path]; ok && item.IsDir {
+		for _, child := range item.Children {
+			removeNodeAndDescendants(nodes, child)
+		}
+	}
+	delete(nodes, path)
 }
