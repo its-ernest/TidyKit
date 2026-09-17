@@ -2,12 +2,13 @@ package ui
 
 import (
 	"fmt"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"tidykit/scanner"
 )
 
 type DynamicMetric struct {
@@ -35,7 +36,7 @@ func MakeDashboardView() fyne.CanvasObject {
 		m.LabelWidget = widget.NewLabel("Scanning...")
 
 		metricRef := m
-		m.BtnWidget = widget.NewButton("Clean Now", func() {
+		m.BtnWidget = widget.NewButton("Check & Optimize", func() {
 			fmt.Printf("Cleaning %s...\n", metricRef.Title)
 		})
 		m.BtnWidget.Disable()
@@ -94,29 +95,43 @@ func MakeDashboardView() fyne.CanvasObject {
 }
 
 func runBackgroundScan(metrics []*DynamicMetric) {
-	// 1. Perform background processing / heavy file checks here
-	time.Sleep(1200 * time.Millisecond)
+	for _, m := range metrics {
+		go func(metric *DynamicMetric) {
+			var size uint64
 
-	mockSizes := []uint64{
-		2 * 1024 * 1024 * 1024,  // 2.0 GB
-		14 * 1024 * 1024 * 1024, // 14.0 GB
-		850 * 1024 * 1024,       // 850 MB
-		120 * 1024 * 1024,       // 120 MB
-	}
+			switch metric.Title {
+			case "Purgable Cache":
+				cacheSize, err := scanner.ScanCacheSize()
+				if err == nil {
+					size = uint64(cacheSize)
+				}
+			case "Large Files":
+				files, err := scanner.ScanLargeFiles(100*1024*1024, 100)
+				if err == nil {
+					for _, f := range files {
+						size += uint64(f.Size)
+					}
+				}
+			case "Duplicates":
+				groups, err := scanner.ScanDuplicates()
+				if err == nil {
+					for _, g := range groups {
+						size += uint64(g.Size)
+					}
+				}
+			case "Trash":
+				trashSize, err := scanner.ScanTrashSize()
+				if err == nil {
+					size = uint64(trashSize)
+				}
+			}
 
-	for i, m := range metrics {
-		m.Bytes = mockSizes[i]
-		m.IsLoading = false
-		formattedSize := formatBytes(m.Bytes)
-
-		// 2. Capture local variables for closure safely
-		label := m.LabelWidget
-		btn := m.BtnWidget
-
-		// 3. Dispatch UI mutations onto Fyne's main thread using fyne.Do
-		fyne.Do(func() {
-			label.SetText(formattedSize)
-			btn.Enable()
-		})
+			fyne.Do(func() {
+				metric.Bytes = size
+				metric.IsLoading = false
+				metric.LabelWidget.SetText(formatBytes(size))
+				metric.BtnWidget.Enable()
+			})
+		}(m)
 	}
 }
