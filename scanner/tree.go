@@ -70,6 +70,12 @@ func ScanDir(rootPath string) (map[string]*TreeItem, error) {
 	}
 
 	for _, item := range nodes {
+		if item.IsDir {
+			item.Size = calculateDirSize(nodes, item)
+		}
+	}
+
+	for _, item := range nodes {
 		if len(item.Children) > 0 {
 			sort.SliceStable(item.Children, func(i, j int) bool {
 				childI := nodes[item.Children[i]]
@@ -80,13 +86,24 @@ func ScanDir(rootPath string) (map[string]*TreeItem, error) {
 				if !childI.IsDir && childJ.IsDir {
 					return false
 				}
-				if childI.IsDir && childJ.IsDir {
-					return childI.Name < childJ.Name
-				}
 				return childI.Size > childJ.Size
 			})
 		}
 	}
 
 	return nodes, nil
+}
+
+func calculateDirSize(nodes map[string]*TreeItem, dir *TreeItem) int64 {
+	var total int64
+	for _, childPath := range dir.Children {
+		if child, ok := nodes[childPath]; ok {
+			if child.IsDir {
+				total += calculateDirSize(nodes, child)
+			} else {
+				total += child.Size
+			}
+		}
+	}
+	return total
 }

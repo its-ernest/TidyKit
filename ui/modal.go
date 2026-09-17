@@ -89,20 +89,25 @@ func ShowScanModal(rootPath string, canvas fyne.Canvas) {
 				return 0
 			},
 			func() fyne.CanvasObject {
-				deleteBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), nil)
+				sizeLabel := widget.NewLabel("")
 				return container.NewBorder(
 					nil, nil,
 					container.NewHBox(
 						widget.NewIcon(theme.FolderIcon()),
 						widget.NewLabel("Template"),
 					),
-					deleteBtn,
+					container.NewHBox(
+						sizeLabel,
+						widget.NewButtonWithIcon("", theme.DeleteIcon(), nil),
+					),
 				)
 			},
 			func(id widget.ListItemID, obj fyne.CanvasObject) {
 				border := obj.(*fyne.Container)
 				leftContent := border.Objects[0].(*fyne.Container)
-				deleteBtn := border.Objects[1].(*widget.Button)
+				rightContent := border.Objects[1].(*fyne.Container)
+				sizeLabel := rightContent.Objects[0].(*widget.Label)
+				deleteBtn := rightContent.Objects[1].(*widget.Button)
 
 				icon := leftContent.Objects[0].(*widget.Icon)
 				label := leftContent.Objects[1].(*widget.Label)
@@ -118,6 +123,7 @@ func ShowScanModal(rootPath string, canvas fyne.Canvas) {
 								icon.SetResource(theme.FileIcon())
 								label.SetText(fmt.Sprintf("%s (%s)", childItem.Name, scanner.FormatBytes(uint64(childItem.Size))))
 							}
+							sizeLabel.SetText(scanner.FormatBytes(uint64(childItem.Size)))
 
 							childPathCopy := childPath
 							deleteBtn.OnTapped = func() {
