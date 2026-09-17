@@ -10,7 +10,7 @@ import (
 func main() {
 	a := app.New()
 	w := a.NewWindow("TidyKit")
-	w.Resize(fyne.NewSize(850, 520))
+	w.Resize(fyne.NewSize(900, 560))
 
 	w.SetContent(ui.BuildMainUI(w))
 	w.ShowAndRun()
