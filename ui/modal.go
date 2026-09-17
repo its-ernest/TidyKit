@@ -162,7 +162,7 @@ func ShowScanModal(rootPath string, canvas fyne.Canvas) {
 					if childItem, ok := nodes[childPath]; ok && childItem.IsDir {
 						currentPath = childPath
 						pathLabel.SetText(currentPath)
-						if filepath.Dir(currentPath) != cleanRoot {
+						if currentPath != cleanRoot {
 							backBtn.Enable()
 						} else {
 							backBtn.Disable()
