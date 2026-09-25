@@ -14,7 +14,7 @@ type DuplicateGroup struct {
 	Size  int64
 }
 
-func ScanDuplicates() ([]DuplicateGroup, error) {
+func ScanDuplicates() ([]CleanableItem, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -75,14 +75,20 @@ func ScanDuplicates() ([]DuplicateGroup, error) {
 		}
 	}
 
-	var result []DuplicateGroup
+	var result []CleanableItem
 	for _, g := range groups {
 		if len(g.Files) > 1 {
 			info, _ := os.Stat(g.Files[0])
 			if info != nil {
 				g.Size = info.Size() * int64(len(g.Files)-1)
 			}
-			result = append(result, *g)
+			for i := 1; i < len(g.Files); i++ {
+				result = append(result, CleanableItem{
+					Name: g.Files[i],
+					Path: g.Files[i],
+					Size: g.Size / int64(len(g.Files)-1),
+				})
+			}
 		}
 	}
 

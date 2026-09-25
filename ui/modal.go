@@ -13,6 +13,8 @@ import (
 	"tidykit/scanner"
 )
 
+type CleanableItem = scanner.CleanableItem
+
 // ShowModal wraps arbitrary CanvasObject content inside a dismissible modal overlay.
 func ShowModal(title string, content fyne.CanvasObject, canvas fyne.Canvas) *widget.PopUp {
 	var modal *widget.PopUp
@@ -41,12 +43,109 @@ func ShowModal(title string, content fyne.CanvasObject, canvas fyne.Canvas) *wid
 	return modal
 }
 
-type TreeItem = scanner.TreeItem
+// ShowCleanModal displays a list of cleanable items with a Clean All button.
+func ShowCleanModal(title string, items []CleanableItem, cleanFunc func() error, canvas fyne.Canvas) {
+	totalSize := int64(0)
+	for _, item := range items {
+		totalSize += item.Size
+	}
 
-// Helper to format byte sizes into human-readable strings
-func formatBytes(bytes uint64) string {
-	return scanner.FormatBytes(bytes)
+	summaryLabel := widget.NewLabel(fmt.Sprintf("%d items · %s reclaimable", len(items), scanner.FormatBytes(uint64(totalSize))))
+	progress := widget.NewProgressBarInfinite()
+
+	loadingView := container.NewCenter(
+		container.NewVBox(
+			summaryLabel,
+			progress,
+		),
+	)
+
+	contentBox := container.NewStack(loadingView)
+	_ = ShowModal(title, contentBox, canvas)
+
+	go func() {
+		var list *widget.List
+		list = widget.NewList(
+			func() int { return len(items) },
+			func() fyne.CanvasObject {
+				return container.NewBorder(
+					nil, nil,
+					container.NewHBox(
+						widget.NewIcon(theme.FileIcon()),
+						widget.NewLabel("Template"),
+					),
+					container.NewHBox(
+						widget.NewLabel(""),
+						widget.NewButtonWithIcon("", theme.DeleteIcon(), nil),
+					),
+				)
+			},
+			func(id widget.ListItemID, obj fyne.CanvasObject) {
+				border := obj.(*fyne.Container)
+				leftContent := border.Objects[0].(*fyne.Container)
+				rightContent := border.Objects[1].(*fyne.Container)
+				sizeLabel := rightContent.Objects[0].(*widget.Label)
+				deleteBtn := rightContent.Objects[1].(*widget.Button)
+
+				icon := leftContent.Objects[0].(*widget.Icon)
+				label := leftContent.Objects[1].(*widget.Label)
+
+				if id < len(items) {
+					item := items[id]
+					icon.SetResource(theme.FileIcon())
+					label.SetText(item.Name)
+					sizeLabel.SetText(scanner.FormatBytes(uint64(item.Size)))
+
+					itemCopy := item
+					itemsCopy := items
+					deleteBtn.OnTapped = func() {
+						go func() {
+							_ = os.Remove(itemCopy.Path)
+							fyne.Do(func() {
+								itemsCopy = append(itemsCopy[:id], itemsCopy[id+1:]...)
+								total := int64(0)
+								for _, it := range itemsCopy {
+									total += it.Size
+								}
+								summaryLabel.SetText(fmt.Sprintf("%d items · %s reclaimable", len(itemsCopy), scanner.FormatBytes(uint64(total))))
+								list.Refresh()
+							})
+						}()
+					}
+				}
+			},
+		)
+
+		cleanBtn := widget.NewButton("Clean All", func() {
+			go func() {
+				_ = cleanFunc()
+				fyne.Do(func() {
+					contentBox.Objects = []fyne.CanvasObject{
+						widget.NewLabel("Cleaning complete!"),
+					}
+					contentBox.Refresh()
+				})
+			}()
+		})
+
+		content := container.NewBorder(
+			container.NewVBox(
+				summaryLabel,
+				widget.NewSeparator(),
+			),
+			cleanBtn,
+			nil, nil,
+			list,
+		)
+
+		fyne.Do(func() {
+			contentBox.Objects = []fyne.CanvasObject{content}
+			contentBox.Refresh()
+		})
+	}()
 }
+
+type TreeItem = scanner.TreeItem
 
 // ShowScanModal launches a recursive directory scanner and displays results in a navigable list.
 func ShowScanModal(rootPath string, canvas fyne.Canvas) {

@@ -16,7 +16,7 @@ func BuildMainUI(win fyne.Window) fyne.CanvasObject {
 		contentBox: container.NewStack(),
 	}
 
-	router.views["dashboard"] = MakeDashboardView()
+	router.views["dashboard"] = MakeDashboardView(win)
 	router.views["drives"] = MakeDrivesView(win)
 
 	sidebar := MakeSidebar(func(viewID string) {

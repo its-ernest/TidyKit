@@ -15,6 +15,12 @@ type TreeItem struct {
 	Children []string
 }
 
+type CleanableItem struct {
+	Name string
+	Path string
+	Size int64
+}
+
 func FormatBytes(bytes uint64) string {
 	const unit = 1024
 	if bytes < unit {

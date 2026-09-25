@@ -12,7 +12,7 @@ type LargeFileInfo struct {
 	Size int64
 }
 
-func ScanLargeFiles(minSize int64, maxResults int) ([]LargeFileInfo, error) {
+func ScanLargeFiles(minSize int64, maxResults int) ([]CleanableItem, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -26,7 +26,7 @@ func ScanLargeFiles(minSize int64, maxResults int) ([]LargeFileInfo, error) {
 		scanRoots = append(scanRoots, "/")
 	}
 
-	var files []LargeFileInfo
+	var files []CleanableItem
 	seen := make(map[string]bool)
 
 	for _, root := range scanRoots {
@@ -54,7 +54,8 @@ func ScanLargeFiles(minSize int64, maxResults int) ([]LargeFileInfo, error) {
 			}
 
 			if info.Size() >= minSize {
-				files = append(files, LargeFileInfo{
+				files = append(files, CleanableItem{
+					Name: path,
 					Path: path,
 					Size: info.Size(),
 				})

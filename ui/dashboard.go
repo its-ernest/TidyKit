@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -17,9 +18,11 @@ type DynamicMetric struct {
 	IsLoading   bool
 	LabelWidget *widget.Label
 	BtnWidget   *widget.Button
+	Items       []scanner.CleanableItem
+	CleanFunc   func() error
 }
 
-func MakeDashboardView() fyne.CanvasObject {
+func MakeDashboardView(win fyne.Window) fyne.CanvasObject {
 	header := widget.NewLabelWithStyle("Dashboard", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
 	metrics := []*DynamicMetric{
@@ -37,7 +40,9 @@ func MakeDashboardView() fyne.CanvasObject {
 
 		metricRef := m
 		m.BtnWidget = widget.NewButton("Check & Optimize", func() {
-			fmt.Printf("Cleaning %s...\n", metricRef.Title)
+			if len(metricRef.Items) > 0 {
+				ShowCleanModal(metricRef.Title, metricRef.Items, metricRef.CleanFunc, win.Canvas())
+			}
 		})
 		m.BtnWidget.Disable()
 
@@ -50,15 +55,32 @@ func MakeDashboardView() fyne.CanvasObject {
 	}
 
 	actionSectionTitle := widget.NewLabelWithStyle("Quick Actions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+
+	var trashMetric *DynamicMetric
+	for _, m := range metrics {
+		if m.Title == "Trash" {
+			trashMetric = m
+			break
+		}
+	}
+
 	actionsGrid := container.NewGridWithColumns(3,
 		widget.NewButtonWithIcon("Deep Scan System", theme.SearchIcon(), func() {
-			fmt.Println("Triggered: Deep Scan")
+			ShowScanModal("/", win.Canvas())
 		}),
 		widget.NewButtonWithIcon("Empty Trash", theme.DeleteIcon(), func() {
-			fmt.Println("Triggered: Empty Trash")
-		}),
-		widget.NewButtonWithIcon("Optimize Storage", theme.SettingsIcon(), func() {
-			fmt.Println("Triggered: Optimize Storage")
+			if trashMetric != nil {
+				_ = scanner.EmptyTrash()
+				items, _ := scanner.ScanTrashFiles()
+				fyne.Do(func() {
+					total := uint64(0)
+					for _, item := range items {
+						total += uint64(item.Size)
+					}
+					trashMetric.Bytes = total
+					trashMetric.LabelWidget.SetText(scanner.FormatBytes(total))
+				})
+			}
 		}),
 		widget.NewButtonWithIcon("Analyze Disk Usage", theme.StorageIcon(), func() {
 			fmt.Println("Triggered: Disk Analysis")
@@ -88,7 +110,6 @@ func MakeDashboardView() fyne.CanvasObject {
 
 	scrollContent := container.NewScroll(mainBody)
 
-	// Run heavy disk scanning off the UI thread
 	go runBackgroundScan(metrics)
 
 	return container.NewBorder(topContainer, nil, nil, nil, scrollContent)
@@ -101,9 +122,18 @@ func runBackgroundScan(metrics []*DynamicMetric) {
 
 			switch metric.Title {
 			case "Purgable Cache":
-				cacheSize, err := scanner.ScanCacheSize()
+				items, err := scanner.ScanCacheFiles()
 				if err == nil {
-					size = uint64(cacheSize)
+					for _, item := range items {
+						size += uint64(item.Size)
+					}
+					metric.Items = items
+					metric.CleanFunc = func() error {
+						for _, item := range items {
+							_ = os.Remove(item.Path)
+						}
+						return nil
+					}
 				}
 			case "Large Files":
 				files, err := scanner.ScanLargeFiles(100*1024*1024, 100)
@@ -111,25 +141,45 @@ func runBackgroundScan(metrics []*DynamicMetric) {
 					for _, f := range files {
 						size += uint64(f.Size)
 					}
+					metric.Items = files
+					metric.CleanFunc = func() error {
+						for _, item := range files {
+							_ = os.Remove(item.Path)
+						}
+						return nil
+					}
 				}
 			case "Duplicates":
-				groups, err := scanner.ScanDuplicates()
+				items, err := scanner.ScanDuplicates()
 				if err == nil {
-					for _, g := range groups {
-						size += uint64(g.Size)
+					for _, item := range items {
+						size += uint64(item.Size)
+					}
+					metric.Items = items
+					metric.CleanFunc = func() error {
+						for _, item := range items {
+							_ = os.Remove(item.Path)
+						}
+						return nil
 					}
 				}
 			case "Trash":
-				trashSize, err := scanner.ScanTrashSize()
+				items, err := scanner.ScanTrashFiles()
 				if err == nil {
-					size = uint64(trashSize)
+					for _, item := range items {
+						size += uint64(item.Size)
+					}
+					metric.Items = items
+					metric.CleanFunc = func() error {
+						return scanner.EmptyTrash()
+					}
 				}
 			}
 
 			fyne.Do(func() {
 				metric.Bytes = size
 				metric.IsLoading = false
-				metric.LabelWidget.SetText(formatBytes(size))
+				metric.LabelWidget.SetText(scanner.FormatBytes(size))
 				metric.BtnWidget.Enable()
 			})
 		}(m)

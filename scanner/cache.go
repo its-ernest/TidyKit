@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 )
 
-func ScanCacheSize() (int64, error) {
+func ScanCacheFiles() ([]CleanableItem, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	cachePaths := []string{
@@ -18,7 +18,7 @@ func ScanCacheSize() (int64, error) {
 	}
 
 	seen := make(map[string]bool)
-	var total int64
+	var items []CleanableItem
 
 	for _, cacheRoot := range cachePaths {
 		if seen[cacheRoot] {
@@ -35,11 +35,15 @@ func ScanCacheSize() (int64, error) {
 			}
 			info, err := d.Info()
 			if err == nil {
-				total += info.Size()
+				items = append(items, CleanableItem{
+					Name: path,
+					Path: path,
+					Size: info.Size(),
+				})
 			}
 			return nil
 		})
 	}
 
-	return total, nil
+	return items, nil
 }
