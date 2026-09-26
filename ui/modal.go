@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"fyne.io/fyne/v2"
@@ -14,6 +15,16 @@ import (
 )
 
 type CleanableItem = scanner.CleanableItem
+
+func truncateName(name string, maxLen int) string {
+	if len(name) <= maxLen {
+		return name
+	}
+	if maxLen <= 3 {
+		return name[:maxLen]
+	}
+	return name[:maxLen-3] + "..."
+}
 
 // ShowModal wraps arbitrary CanvasObject content inside a dismissible modal overlay.
 func ShowModal(title string, content fyne.CanvasObject, canvas fyne.Canvas) *widget.PopUp {
@@ -76,6 +87,7 @@ func ShowCleanModal(title string, items []CleanableItem, cleanFunc func() error,
 					),
 					container.NewHBox(
 						widget.NewLabel(""),
+						widget.NewButtonWithIcon("", theme.FolderOpenIcon(), nil),
 						widget.NewButtonWithIcon("", theme.DeleteIcon(), nil),
 					),
 				)
@@ -85,7 +97,8 @@ func ShowCleanModal(title string, items []CleanableItem, cleanFunc func() error,
 				leftContent := border.Objects[0].(*fyne.Container)
 				rightContent := border.Objects[1].(*fyne.Container)
 				sizeLabel := rightContent.Objects[0].(*widget.Label)
-				deleteBtn := rightContent.Objects[1].(*widget.Button)
+				openBtn := rightContent.Objects[1].(*widget.Button)
+				deleteBtn := rightContent.Objects[2].(*widget.Button)
 
 				icon := leftContent.Objects[0].(*widget.Icon)
 				label := leftContent.Objects[1].(*widget.Label)
@@ -93,7 +106,7 @@ func ShowCleanModal(title string, items []CleanableItem, cleanFunc func() error,
 				if id < len(items) {
 					item := items[id]
 					icon.SetResource(theme.FileIcon())
-					label.SetText(item.Name)
+					label.SetText(truncateName(item.Name, 75))
 					sizeLabel.SetText(scanner.FormatBytes(uint64(item.Size)))
 
 					itemCopy := item
@@ -108,8 +121,15 @@ func ShowCleanModal(title string, items []CleanableItem, cleanFunc func() error,
 									total += it.Size
 								}
 								summaryLabel.SetText(fmt.Sprintf("%d items · %s reclaimable", len(itemsCopy), scanner.FormatBytes(uint64(total))))
+								list.UnselectAll()
 								list.Refresh()
 							})
+						}()
+					}
+
+					openBtn.OnTapped = func() {
+						go func() {
+							_ = exec.Command("xdg-open", itemCopy.Path).Start()
 						}()
 					}
 				}
@@ -238,6 +258,7 @@ func ShowScanModal(rootPath string, canvas fyne.Canvas) {
 												}
 											}
 										}
+										list.UnselectAll()
 										list.Refresh()
 									})
 								}()
@@ -253,6 +274,7 @@ func ShowScanModal(rootPath string, canvas fyne.Canvas) {
 			if parent != currentPath {
 				currentPath = parent
 				pathLabel.SetText(currentPath)
+				list.UnselectAll()
 				list.Refresh()
 			}
 		})
@@ -272,6 +294,7 @@ func ShowScanModal(rootPath string, canvas fyne.Canvas) {
 						} else {
 							backBtn.Disable()
 						}
+						list.UnselectAll()
 						list.Refresh()
 					}
 				}
